@@ -104,24 +104,27 @@ func (hc *HealthController) HandleHeartbeat(beat *ControllerHeartbeat) {
 // CheckHealth evaluates the time since last heartbeat to decide if the controller is running or not
 func (hc *HealthController) CheckHealth() bool {
 	health := true
-	graceTime := time.Duration(1500 * time.Millisecond)
+	graceTimeDivisor := time.Duration(4)
 
 	if hc.Config.RunFirewall {
-		if time.Since(hc.Status.NetworkPolicyControllerAlive) > hc.Config.IPTablesSyncPeriod+hc.Status.NetworkPolicyControllerAliveTTL+graceTime {
+		configSpecificGraceTime := hc.Config.IPTablesSyncPeriod / graceTimeDivisor
+		if time.Since(hc.Status.NetworkPolicyControllerAlive) > hc.Config.IPTablesSyncPeriod+hc.Status.NetworkPolicyControllerAliveTTL+configSpecificGraceTime {
 			glog.Error("Network Policy Controller heartbeat missed")
 			health = false
 		}
 	}
 
 	if hc.Config.RunRouter {
-		if time.Since(hc.Status.NetworkRoutingControllerAlive) > hc.Config.RoutesSyncPeriod+hc.Status.NetworkRoutingControllerAliveTTL+graceTime {
+		configSpecificGraceTime := hc.Config.RoutesSyncPeriod / graceTimeDivisor
+		if time.Since(hc.Status.NetworkRoutingControllerAlive) > hc.Config.RoutesSyncPeriod+hc.Status.NetworkRoutingControllerAliveTTL+configSpecificGraceTime {
 			glog.Error("Network Routing Controller heartbeat missed")
 			health = false
 		}
 	}
 
 	if hc.Config.RunServiceProxy {
-		if time.Since(hc.Status.NetworkServicesControllerAlive) > hc.Config.IpvsSyncPeriod+hc.Status.NetworkServicesControllerAliveTTL+graceTime {
+		configSpecificGraceTime := hc.Config.IpvsSyncPeriod / graceTimeDivisor
+		if time.Since(hc.Status.NetworkServicesControllerAlive) > hc.Config.IpvsSyncPeriod+hc.Status.NetworkServicesControllerAliveTTL+configSpecificGraceTime {
 			glog.Error("NetworkService Controller heartbeat missed")
 			health = false
 		}
