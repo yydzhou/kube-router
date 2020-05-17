@@ -768,6 +768,14 @@
 
 [[projects]]
   branch = "master"
+  digest = "1:4692f916cb72b2c295f04841036d85a3f13e96d1cc9e8e4c2c30edebac518053"
+  name = "golang.org/x/sync"
+  packages = ["semaphore"]
+  pruneopts = "UT"
+  revision = "43a5402ce75a95522677f77c619865d66b8c57ab"
+
+[[projects]]
+  branch = "master"
   digest = "1:4d0a3e91e65c614186d6f0e9a65b7a1c0f80ff233634585c6f8eed728fabf4cb"
   name = "golang.org/x/sys"
   packages = [
@@ -1132,9 +1140,11 @@
     "github.com/vishvananda/netlink/nl",
     "github.com/vishvananda/netns",
     "golang.org/x/net/context",
+    "golang.org/x/sync/semaphore",
     "k8s.io/api/core/v1",
     "k8s.io/api/extensions/v1beta1",
     "k8s.io/api/networking/v1",
+    "k8s.io/apimachinery/pkg/api/resource",
     "k8s.io/apimachinery/pkg/apis/meta/v1",
     "k8s.io/apimachinery/pkg/labels",
     "k8s.io/apimachinery/pkg/util/intstr",
