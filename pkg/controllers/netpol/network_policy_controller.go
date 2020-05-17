@@ -21,6 +21,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/golang/glog"
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sync/semaphore"
 
 	api "k8s.io/api/core/v1"
 	apiextensions "k8s.io/api/extensions/v1beta1"
@@ -54,7 +55,7 @@ const (
 type NetworkPolicyController struct {
 	nodeIP          net.IP
 	nodeHostName    string
-	mu              sync.Mutex
+	syncSem         *semaphore.Weighted
 	syncPeriod      time.Duration
 	MetricsEnabled  bool
 	v1NetworkPolicy bool
@@ -152,13 +153,9 @@ func (npc *NetworkPolicyController) Run(healthChan chan<- *healthcheck.Controlle
 		}
 
 		glog.V(1).Info("Performing periodic sync of iptables to reflect network policies")
-		err := npc.Sync()
-		if err != nil {
-			glog.Errorf("Error during periodic sync of network policies in network policy controller. Error: " + err.Error())
-			glog.Errorf("Skipping sending heartbeat from network policy controller as periodic sync failed.")
-		} else {
-			healthcheck.SendHeartBeat(healthChan, "NPC")
-		}
+		// The first Sync we call synchronously so that we can give kube-router a chance to setup all of the policies
+		// before we start getting incremental updates from the k8s watchers
+		npc.Sync()
 		npc.readyForUpdates = true
 		select {
 		case <-stopCh:
@@ -179,10 +176,9 @@ func (npc *NetworkPolicyController) OnPodUpdate(obj interface{}) {
 		return
 	}
 
-	err := npc.Sync()
-	if err != nil {
-		glog.Errorf("Error syncing network policy for the update to pod: %s/%s Error: %s", pod.Namespace, pod.Name, err)
-	}
+	// We call asynchronously here and enforce synchronicity via a semaphore in the Sync() method so we don't hold up
+	// the k8s handler and grow memory unbounded
+	go npc.Sync()
 }
 
 // OnNetworkPolicyUpdate handles updates to network policy from the kubernetes api server
@@ -195,10 +191,9 @@ func (npc *NetworkPolicyController) OnNetworkPolicyUpdate(obj interface{}) {
 		return
 	}
 
-	err := npc.Sync()
-	if err != nil {
-		glog.Errorf("Error syncing network policy for the update to network policy: %s/%s Error: %s", netpol.Namespace, netpol.Name, err)
-	}
+	// We call asynchronously here and enforce synchronicity via a semaphore in the Sync() method so we don't hold up
+	// the k8s handler and grow memory unbounded
+	go npc.Sync()
 }
 
 // OnNamespaceUpdate handles updates to namespace from kubernetes api server
@@ -215,18 +210,28 @@ func (npc *NetworkPolicyController) OnNamespaceUpdate(obj interface{}) {
 		return
 	}
 
-	err := npc.Sync()
-	if err != nil {
-		glog.Errorf("Error syncing on namespace update: %s", err)
-	}
+	// We call asynchronously here and enforce synchronicity via a semaphore in the Sync() method so we don't hold up
+	// the k8s handler and grow memory unbounded
+	go npc.Sync()
 }
 
-// Sync synchronizes iptables to desired state of network policies
-func (npc *NetworkPolicyController) Sync() error {
+// Sync synchronizes iptables to desired state of network policies. We treat the netpol controller differently here than
+// other controllers as it performs a full sync every time a new object is received from k8s which can take a
+// significant amount of time. In the meantime, if k8s objects are allowed to stack up behind the watch then kube-router
+// memory will grow unbounded.
+func (npc *NetworkPolicyController) Sync() {
 
 	var err error
-	npc.mu.Lock()
-	defer npc.mu.Unlock()
+	// We would want to revisit this if we ever get this controller to a place where it is event driven instead of
+	// performing a full sync every time we receive a pod object. For now, since it is a full sync we need to enforce
+	// a single thread of execution, but since the k8s handlers call into this method we can't block here or we'll end
+	// up with memory issues as the iptables sync time inevitably takes time and the k8s streamwatcher backs up on k8s
+	// metadata
+	if !npc.syncSem.TryAcquire(1) {
+		glog.V(1).Info("Call to sync, but already in the middle of a sync, returning fast")
+		return
+	}
+	defer npc.syncSem.Release(1)
 
 	healthcheck.SendHeartBeat(npc.healthChan, "NPC")
 	start := time.Now()
@@ -244,32 +249,37 @@ func (npc *NetworkPolicyController) Sync() error {
 	if npc.v1NetworkPolicy {
 		networkPoliciesInfo, err = npc.buildNetworkPoliciesInfo()
 		if err != nil {
-			return errors.New("Aborting sync. Failed to build network policies: " + err.Error())
+			glog.Errorf("Aborting sync. Failed to build network policies: %v", err.Error())
+			return
 		}
 	} else {
 		// TODO remove the Beta support
 		networkPoliciesInfo, err = npc.buildBetaNetworkPoliciesInfo()
 		if err != nil {
-			return errors.New("Aborting sync. Failed to build network policies: " + err.Error())
+			glog.Errorf("Aborting sync. Failed to build network policies: %v", err.Error())
+			return
 		}
 	}
 
 	activePolicyChains, activePolicyIpSets, err := npc.syncNetworkPolicyChains(networkPoliciesInfo, syncVersion)
 	if err != nil {
-		return errors.New("Aborting sync. Failed to sync network policy chains: " + err.Error())
+		glog.Errorf("Aborting sync. Failed to sync network policy chains: %v", err.Error())
+		return
 	}
 
 	activePodFwChains, err := npc.syncPodFirewallChains(networkPoliciesInfo, syncVersion)
 	if err != nil {
-		return errors.New("Aborting sync. Failed to sync pod firewalls: " + err.Error())
+		glog.Errorf("Aborting sync. Failed to sync pod firewalls: %v", err.Error())
+		return
 	}
 
 	err = cleanupStaleRules(activePolicyChains, activePodFwChains, activePolicyIpSets)
 	if err != nil {
-		return errors.New("Aborting sync. Failed to cleanup stale iptables rules: " + err.Error())
+		glog.Errorf("Aborting sync. Failed to cleanup stale iptables rules: %v", err.Error())
+		return
 	}
 
-	return nil
+	return
 }
 
 // Configure iptables rules representing each network policy. All pod's matched by
@@ -1699,10 +1709,9 @@ func (npc *NetworkPolicyController) handlePodDelete(obj interface{}) {
 		return
 	}
 
-	err := npc.Sync()
-	if err != nil {
-		glog.Errorf("Error syncing network policy for pod: %s/%s delete event Error: %s", pod.Namespace, pod.Name, err)
-	}
+	// We call asynchronously here and enforce synchronicity via a semaphore in the Sync() method so we don't hold up
+	// the k8s handler and grow memory unbounded
+	go npc.Sync()
 }
 
 func (npc *NetworkPolicyController) handleNamespaceDelete(obj interface{}) {
@@ -1729,10 +1738,9 @@ func (npc *NetworkPolicyController) handleNamespaceDelete(obj interface{}) {
 		return
 	}
 
-	err := npc.Sync()
-	if err != nil {
-		glog.Errorf("Error syncing network policies on namespace: %s delete event", err)
-	}
+	// We call asynchronously here and enforce synchronicity via a semaphore in the Sync() method so we don't hold up
+	// the k8s handler and grow memory unbounded
+	go npc.Sync()
 }
 
 func (npc *NetworkPolicyController) handleNetworkPolicyDelete(obj interface{}) {
@@ -1755,10 +1763,9 @@ func (npc *NetworkPolicyController) handleNetworkPolicyDelete(obj interface{}) {
 		return
 	}
 
-	err := npc.Sync()
-	if err != nil {
-		glog.Errorf("Error syncing network policy for the network policy: %s/%s delete event, Error: %s", netpol.Namespace, netpol.Name, err)
-	}
+	// We call asynchronously here and enforce synchronicity via a semaphore in the Sync() method so we don't hold up
+	// the k8s handler and grow memory unbounded
+	go npc.Sync()
 }
 
 // NewNetworkPolicyController returns new NetworkPolicyController object
@@ -1775,6 +1782,7 @@ func NewNetworkPolicyController(clientset kubernetes.Interface,
 	}
 
 	npc.syncPeriod = config.IPTablesSyncPeriod
+	npc.syncSem = semaphore.NewWeighted(1)
 
 	npc.v1NetworkPolicy = true
 	v, _ := clientset.Discovery().ServerVersion()
