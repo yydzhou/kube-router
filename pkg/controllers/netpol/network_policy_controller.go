@@ -1849,9 +1849,14 @@ func (npc *NetworkPolicyController) handleNetworkPolicyDelete(obj interface{}) {
 	npc.RequestFullSync()
 }
 
+// SetPodIndexer sets the indexer used to list the pods
+func (npc *NetworkPolicyController) SetPodIndexer(indexer cache.Indexer) {
+	npc.podLister = indexer
+}
+
 // NewNetworkPolicyController returns new NetworkPolicyController object
 func NewNetworkPolicyController(clientset kubernetes.Interface,
-	config *options.KubeRouterConfig, podInformer cache.SharedIndexInformer,
+	config *options.KubeRouterConfig, podInformer cache.Indexer,
 	npInformer cache.SharedIndexInformer, nsInformer cache.SharedIndexInformer) (*NetworkPolicyController, error) {
 	npc := NetworkPolicyController{}
 
@@ -1939,7 +1944,7 @@ func NewNetworkPolicyController(clientset kubernetes.Interface,
 	}
 	npc.ipSetHandler = ipset
 
-	npc.podLister = podInformer.GetIndexer()
+	npc.podLister = podInformer
 	npc.PodEventHandler = npc.newPodEventHandler()
 
 	npc.nsLister = nsInformer.GetIndexer()
