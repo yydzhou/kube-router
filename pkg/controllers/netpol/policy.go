@@ -286,7 +286,7 @@ func (npc *NetworkPolicyController) processIngressRules(policy *networkPolicyInf
 			for _, pod := range ingressRule.srcPods {
 				ingressRuleSrcPodIPs = append(ingressRuleSrcPodIPs, pod.ip)
 			}
-			err = srcPodIPSet.Refresh(ingressRuleSrcPodIPs, utils.OptionTimeout, "0")
+			err = srcPodIPSet.Refresh(ingressRuleSrcPodIPs)
 			if err != nil {
 				glog.Errorf("failed to refresh srcPodIPSet: " + err.Error())
 			}
@@ -311,7 +311,7 @@ func (npc *NetworkPolicyController) processIngressRules(policy *networkPolicyInf
 						return fmt.Errorf("failed to create ipset: %s", err.Error())
 					}
 					activePolicyIPSets[namedPortIPSet.Name] = true
-					err = namedPortIPSet.Refresh(endPoints.ips, utils.OptionTimeout, "0")
+					err = namedPortIPSet.Refresh(endPoints.ips)
 					if err != nil {
 						glog.Errorf("failed to refresh namedPortIPSet: " + err.Error())
 					}
@@ -354,7 +354,7 @@ func (npc *NetworkPolicyController) processIngressRules(policy *networkPolicyInf
 
 				activePolicyIPSets[namedPortIPSet.Name] = true
 
-				err = namedPortIPSet.Refresh(endPoints.ips, utils.OptionTimeout, "0")
+				err = namedPortIPSet.Refresh(endPoints.ips)
 				if err != nil {
 					glog.Errorf("failed to refresh namedPortIPSet: " + err.Error())
 				}
@@ -405,7 +405,7 @@ func (npc *NetworkPolicyController) processIngressRules(policy *networkPolicyInf
 
 					activePolicyIPSets[namedPortIPSet.Name] = true
 
-					err = namedPortIPSet.Refresh(endPoints.ips, utils.OptionTimeout, "0")
+					err = namedPortIPSet.Refresh(endPoints.ips)
 					if err != nil {
 						glog.Errorf("failed to refresh namedPortIPSet: " + err.Error())
 					}
@@ -462,7 +462,7 @@ func (npc *NetworkPolicyController) processEgressRules(policy *networkPolicyInfo
 			for _, pod := range egressRule.dstPods {
 				egressRuleDstPodIps = append(egressRuleDstPodIps, pod.ip)
 			}
-			err = dstPodIPSet.Refresh(egressRuleDstPodIps, utils.OptionTimeout, "0")
+			err = dstPodIPSet.Refresh(egressRuleDstPodIps)
 			if err != nil {
 				glog.Errorf("failed to refresh dstPodIPSet: " + err.Error())
 			}
@@ -488,7 +488,7 @@ func (npc *NetworkPolicyController) processEgressRules(policy *networkPolicyInfo
 
 					activePolicyIPSets[namedPortIPSet.Name] = true
 
-					err = namedPortIPSet.Refresh(endPoints.ips, utils.OptionTimeout, "0")
+					err = namedPortIPSet.Refresh(endPoints.ips)
 					if err != nil {
 						glog.Errorf("failed to refresh namedPortIPSet: " + err.Error())
 					}
