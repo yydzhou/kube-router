@@ -191,6 +191,12 @@ func (nrc *NetworkRoutingController) Run(healthChan chan<- *healthcheck.Controll
 	}
 
 	// create 'kube-bridge' interface to which pods will be connected
+
+	dzout, err := exec.Command("ip", "route").Output()
+	if err != nil {
+		glog.Errorf("yydzhou: in nrc.run, before create kube-bridge interface: %s ", err.Error())
+	}
+	glog.V(2).Infof("yydzhou: in nrc.run, before create kube-bridge interface: \n %s ", string(dzout))
 	kubeBridgeIf, err := netlink.LinkByName("kube-bridge")
 	if err != nil && err.Error() == IfaceNotFound {
 		linkAttrs := netlink.NewLinkAttrs()
@@ -209,6 +215,8 @@ func (nrc *NetworkRoutingController) Run(healthChan chan<- *healthcheck.Controll
 		}
 	}
 
+	dzout, _ = exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in nrc.run, after create kube-bridge interface:  \n %s ", string(dzout))
 	if nrc.autoMTU {
 		mtu, err := getMTUFromNodeIP(nrc.nodeIP, nrc.enableOverlays)
 		if err != nil {
@@ -246,6 +254,8 @@ func (nrc *NetworkRoutingController) Run(healthChan chan<- *healthcheck.Controll
 
 	// Wait till we are ready to launch BGP server
 	for {
+		dzout, _ := exec.Command("ip", "route").Output()
+		glog.V(2).Infof("yydzhou: in nrc.run, before startBgpServer:  \n %s ", string(dzout))
 		err := nrc.startBgpServer(true)
 		if err != nil {
 			glog.Errorf("Failed to start node BGP server: %s", err)
@@ -414,9 +424,13 @@ func (nrc *NetworkRoutingController) watchBgpUpdates() {
 			return
 		}
 		glog.V(2).Infof("Processing bgp route advertisement from peer: %s", path.NeighborIp)
+		dzout, _ := exec.Command("ip", "route").Output()
+		glog.V(2).Infof("yydzhou: in watchBgpUpdates, before injectRoute:  \n %s ", string(dzout))
 		if err := nrc.injectRoute(path); err != nil {
 			glog.Errorf("Failed to inject routes due to: " + err.Error())
 		}
+		dzout, _ = exec.Command("ip", "route").Output()
+		glog.V(2).Infof("yydzhou: in watchBgpUpdates, after injectRoute with path (%s):  \n %s ", path, string(dzout))
 	}
 	err := nrc.bgpServer.MonitorTable(context.Background(), &gobgpapi.MonitorTableRequest{
 		TableType: gobgpapi.TableType_GLOBAL,
@@ -534,8 +548,10 @@ out:
 
 	tunnelName := generateTunnelName(nextHop.String())
 	sameSubnet := nrc.nodeSubnet.Contains(nextHop)
-
+	glog.V(2).Infof("yydzhou: in injectRoute, the nextHop is: %s. sameSubnet is: %v \n", tunnelName, sameSubnet)
 	// cleanup route and tunnel if overlay is disabled or node is in same subnet and overlay-type is set to 'subnet'
+	dzout, _ := exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in injectRoute, before cleanup route and tennel:  \n %s ", string(dzout))
 	if !nrc.enableOverlays || (sameSubnet && nrc.overlayType == "subnet") {
 		glog.Infof("Cleaning up old routes if there are any")
 		routes, err := netlink.RouteListFiltered(nl.FAMILY_ALL, &netlink.Route{
@@ -561,14 +577,18 @@ out:
 
 	// create IPIP tunnels only when node is not in same subnet or overlay-type is set to 'full'
 	// if the user has disabled overlays, don't create tunnels
+	dzout, _ = exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in injectRoute. after clean up, before IPIP setup:  \n %s ", string(dzout))
 	if (!sameSubnet || nrc.overlayType == "full") && nrc.enableOverlays {
 		// create ip-in-ip tunnel and inject route as overlay is enabled
+		glog.V(2).Infof("yydzhou: in injectRoute, during IPIP setup")
 		var link netlink.Link
 		var err error
 		link, err = netlink.LinkByName(tunnelName)
 		if err != nil {
 			out, err := exec.Command("ip", "tunnel", "add", tunnelName, "mode", "ipip", "local", nrc.nodeIP.String(),
 				"remote", nextHop.String(), "dev", nrc.nodeInterface).CombinedOutput()
+			glog.V(2).Infof("yydzhou: in injectRoute, Creating tunnel: %s, out is: %s", tunnelName, string(out))
 			if err != nil {
 				return fmt.Errorf("Route not injected for the route advertised by the node %s "+
 					"Failed to create tunnel interface %s. error: %s, output: %s",
@@ -612,15 +632,25 @@ out:
 			Protocol: 0x11,
 		}
 	} else {
+		dzout, err = exec.Command("ip", "route").Output()
+		glog.V(2).Infof("yydzhou: else path, igored IPIP setup:  \n %s ", string(dzout))
 		return nil
 	}
-
+	dzout, _ = exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: after IPIP setup:  \n %s ", string(dzout))
 	if path.IsWithdraw {
 		glog.V(2).Infof("Removing route: '%s via %s' from peer in the routing table", dst, nextHop)
 		return netlink.RouteDel(route)
 	}
 	glog.V(2).Infof("Inject route: '%s via %s' from peer to routing table", dst, nextHop)
-	return netlink.RouteReplace(route)
+
+	dzout, _ = exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in injectRoute., before RouteReplace:  \n %s ", string(dzout))
+	err = netlink.RouteReplace(route)
+	dzout, _ = exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in injectRoute., after RouteReplace:  \n %s ", string(dzout))
+
+	return err
 }
 
 // Cleanup performs the cleanup of configurations done
@@ -846,6 +876,8 @@ func (nrc *NetworkRoutingController) startBgpServer(grpcServer bool) error {
 	} else {
 		nrc.bgpServer = gobgp.NewBgpServer()
 	}
+	dzout, _ := exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in startBgpServer, before nrc.bgpServer.Serve:  \n %s ", string(dzout))
 	go nrc.bgpServer.Serve()
 
 	var localAddressList []string
@@ -865,10 +897,14 @@ func (nrc *NetworkRoutingController) startBgpServer(grpcServer bool) error {
 		ListenPort:      int32(nrc.bgpPort),
 	}
 
+	dzout, _ = exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in startBgpServer, before nrc.bgpServer.StartBgp:  \n %s ", string(dzout))
 	if err := nrc.bgpServer.StartBgp(context.Background(), &gobgpapi.StartBgpRequest{Global: global}); err != nil {
 		return errors.New("Failed to start BGP server due to : " + err.Error())
 	}
 
+	dzout, _ = exec.Command("ip", "route").Output()
+	glog.V(2).Infof("yydzhou: in startBgpServer, before watchBgpUpdates:  \n %s ", string(dzout))
 	go nrc.watchBgpUpdates()
 
 	// If the global routing peer is configured then peer with it
