@@ -1828,7 +1828,7 @@ func setupMangleTableRule(ip string, protocol string, port string, fwmark string
 	}
 
 	// setup iptables rule TCPMSS for DSR mode to fix mtu problem
-	mtuArgs := []string{"-d", ip, "-m", "tcp", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1440"}
+	mtuArgs := []string{"-d", ip, "-m", "tcp", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1400"}
 	err = iptablesCmdHandler.AppendUnique("mangle", "PREROUTING", mtuArgs...)
 	if err != nil {
 		return errors.New("Failed to run iptables command to set up TCPMSS due to " + err.Error())
@@ -1869,7 +1869,7 @@ func (ln *linuxNetworking) cleanupMangleTableRule(ip string, protocol string, po
 	}
 
 	// cleanup iptables rule TCPMSS
-	mtuArgs := []string{"-d", ip, "-m", "tcp", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1440"}
+	mtuArgs := []string{"-d", ip, "-m", "tcp", "-p", "tcp", "--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", "1400"}
 	exists, err = iptablesCmdHandler.Exists("mangle", "PREROUTING", mtuArgs...)
 	if err != nil {
 		return errors.New("Failed to cleanup iptables command to set up TCPMSS due to " + err.Error())
